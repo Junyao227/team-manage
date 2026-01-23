@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     debug: bool = True
 
     # 数据库配置
-    database_url: str = f"sqlite+aiosqlite:///{BASE_DIR}/team_manage.db"
+    # 建议在 Docker 中使用 data 目录挂载，以避免文件挂载权限或类型问题
+    database_url: str = f"sqlite+aiosqlite:///{BASE_DIR}/data/team_manage.db"
 
     # 安全配置
     secret_key: str = "your-secret-key-here-change-in-production"

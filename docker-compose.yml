@@ -5,8 +5,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./team_manage.db:/app/team_manage.db
+      - ./data:/app/data
       - ./.env:/app/.env
     restart: always
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./team_manage.db
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/team_manage.db

@@ -11,9 +11,12 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
+from contextlib import asynccontextmanager
 # 导入路由
 from app.routes import redeem, auth, admin, api, user
 from app.config import settings
+from app.database import init_db, close_db, AsyncSessionLocal
+from app.services.auth import auth_service
 
 # 获取项目根目录
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,11 +24,40 @@ APP_DIR = BASE_DIR / "app"
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    应用生命周期管理
+    启动时初始化数据库，关闭时释放资源
+    """
+    logger.info("系统正在启动，正在初始化数据库...")
+    try:
+        # 0. 确保数据库目录存在
+        db_file = settings.database_url.split("///")[-1]
+        Path(db_file).parent.mkdir(parents=True, exist_ok=True)
+        
+        # 1. 创建数据库表
+        await init_db()
+        # 2. 初始化管理员密码（如果不存在）
+        async with AsyncSessionLocal() as session:
+            await auth_service.initialize_admin_password(session)
+        logger.info("数据库初始化完成")
+    except Exception as e:
+        logger.error(f"数据库初始化失败: {e}")
+    
+    yield
+    
+    # 关闭连接
+    await close_db()
+    logger.info("系统正在关闭，已释放数据库连接")
+
+
 # 创建 FastAPI 应用实例
 app = FastAPI(
     title="GPT Team 管理系统",
     description="ChatGPT Team 账号管理和兑换码自动邀请系统",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan
 )
 
 # 全局异常处理
