@@ -22,6 +22,19 @@ class WarrantyCheckRequest(BaseModel):
     code: Optional[str] = None
 
 
+class WarrantyCheckRecord(BaseModel):
+    """质保查询单条记录"""
+    code: str
+    has_warranty: bool
+    warranty_valid: bool
+    warranty_expires_at: Optional[str]
+    status: str
+    used_at: Optional[str]
+    team_id: Optional[int]
+    team_name: Optional[str]
+    team_status: Optional[str]
+
+
 class WarrantyCheckResponse(BaseModel):
     """质保查询响应"""
     success: bool
@@ -31,6 +44,7 @@ class WarrantyCheckResponse(BaseModel):
     banned_teams: list
     can_reuse: bool
     original_code: Optional[str]
+    records: list[WarrantyCheckRecord] = []
     message: Optional[str]
     error: Optional[str]
 
@@ -74,6 +88,7 @@ async def check_warranty(
             banned_teams=result.get("banned_teams", []),
             can_reuse=result.get("can_reuse", False),
             original_code=result.get("original_code"),
+            records=result.get("records", []),
             message=result.get("message"),
             error=None
         )

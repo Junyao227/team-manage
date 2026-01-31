@@ -320,46 +320,102 @@ async function checkWarranty() {
 function showWarrantyResult(data) {
     const warrantyContent = document.getElementById('warrantyContent');
 
-    if (!data.has_warranty) {
+    if (!data.records || data.records.length === 0) {
         warrantyContent.innerHTML = `
             <div class="result-info" style="text-align: center; padding: 2rem;">
                 <div class="result-icon"><i data-lucide="info" style="width: 48px; height: 48px; color: var(--text-muted);"></i></div>
-                <div class="result-title" style="font-size: 1.2rem; margin: 1rem 0;">未找到质保信息</div>
-                <div class="result-message" style="color: var(--text-muted);">${escapeHtml(data.message || '该兑换码不是质保兑换码或未找到相关记录')}</div>
+                <div class="result-title" style="font-size: 1.2rem; margin: 1rem 0;">未找到兑换记录</div>
+                <div class="result-message" style="color: var(--text-muted);">${escapeHtml(data.message || '未找到相关记录')}</div>
             </div>
         `;
     } else {
-        const warrantyStatus = data.warranty_valid ?
-            '<span style="color: var(--success);">✓ 质保有效</span>' :
-            '<span style="color: var(--danger);">✗ 质保已过期</span>';
+        // 1. 顶部状态概览 (如果有质保码)
+        let summaryHtml = '';
+        if (data.has_warranty) {
+            const warrantyStatus = data.warranty_valid ?
+                '<span class="badge badge-success">✓ 质保有效</span>' :
+                '<span class="badge badge-error">✗ 质保已过期</span>';
 
-        const bannedTeamsHtml = data.banned_teams && data.banned_teams.length > 0 ? `
-            <div style="margin-top: 1.5rem; padding: 1rem; background: rgba(239, 68, 68, 0.1); border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.3);">
-                <h4 style="margin: 0 0 0.5rem 0; color: var(--danger); font-size: 0.95rem;">
-                    <i data-lucide="alert-triangle" style="width: 16px; height: 16px;"></i> 
-                    被封 Team 列表
-                </h4>
-                ${data.banned_teams.map(team => `
-                    <div style="padding: 0.5rem 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                        <div style="font-weight: 500;">${escapeHtml(team.team_name || 'Team ' + team.team_id)}</div>
-                        <div style="font-size: 0.85rem; color: var(--text-muted);">${escapeHtml(team.email)}</div>
+            summaryHtml = `
+                <div class="warranty-summary" style="margin-bottom: 2rem; padding: 1.2rem; background: rgba(255,255,255,0.03); border-radius: 12px; border: 1px solid var(--border-base);">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.4rem;">当前质保状态</div>
+                            <div style="font-size: 1.1rem; font-weight: 600;">${warrantyStatus}</div>
+                        </div>
+                        ${data.warranty_expires_at ? `
+                        <div style="text-align: right;">
+                            <div style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.4rem;">质保到期时间</div>
+                            <div style="font-size: 1rem;">${formatDate(data.warranty_expires_at)}</div>
+                        </div>
+                        ` : ''}
                     </div>
-                `).join('')}
-            </div>
-        ` : '<p style="color: var(--text-muted); margin-top: 1rem;">暂无被封 Team</p>';
+                </div>
+            `;
+        }
 
+        // 2. 兑换记录列表
+        const recordsHtml = `
+            <div class="records-section">
+                <h4 style="margin: 0 0 1rem 0; font-size: 1rem; color: var(--text-primary);">我的兑换记录</h4>
+                <div style="display: flex; flex-direction: column; gap: 1rem;">
+                    ${data.records.map(record => {
+            const typeMarker = record.has_warranty ?
+                '<span class="badge badge-warranty" style="background: var(--primary); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem;">质保码</span>' :
+                '<span class="badge badge-normal" style="background: rgba(255,255,255,0.1); color: var(--text-muted); padding: 2px 6px; border-radius: 4px; font-size: 0.75rem;">常规码</span>';
+
+            let teamStatusBadge = '';
+            if (record.team_status === 'active') teamStatusBadge = '<span style="color: var(--success); font-size: 0.8rem;">● 正常</span>';
+            else if (record.team_status === 'full') teamStatusBadge = '<span style="color: var(--success); font-size: 0.8rem;">● 已满</span>';
+            else if (record.team_status === 'banned') teamStatusBadge = '<span style="color: var(--danger); font-size: 0.8rem;">● 封号</span>';
+            else if (record.team_status === 'error') teamStatusBadge = '<span style="color: var(--warning); font-size: 0.8rem;">● 异常</span>';
+            else if (record.team_status === 'expired') teamStatusBadge = '<span style="color: var(--text-muted); font-size: 0.8rem;">● 过期</span>';
+            else teamStatusBadge = `<span style="color: var(--text-muted); font-size: 0.8rem;">● ${record.team_status || '未知'}</span>`;
+
+            return `
+                            <div class="record-card" style="padding: 1rem; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 10px;">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.8rem;">
+                                    <div style="font-family: monospace; font-size: 1.1rem; color: var(--text-primary);">${record.code}</div>
+                                    <div>${typeMarker}</div>
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 1rem; font-size: 0.9rem;">
+                                    <div>
+                                        <div style="color: var(--text-muted); margin-bottom: 0.2rem;">加入 Team</div>
+                                        <div style="font-weight: 500;">${escapeHtml(record.team_name || '未知 Team')} ${teamStatusBadge}</div>
+                                    </div>
+                                    <div>
+                                        <div style="color: var(--text-muted); margin-bottom: 0.2rem;">兑换时间</div>
+                                        <div>${formatDate(record.used_at)}</div>
+                                    </div>
+                                    ${record.has_warranty ? `
+                                    <div style="grid-column: span 2;">
+                                        <div style="color: var(--text-muted); margin-bottom: 0.2rem;">质保到期</div>
+                                        <div style="${record.warranty_valid ? 'color: var(--success);' : 'color: var(--danger);'}">
+                                            ${formatDate(record.warranty_expires_at)} ${record.warranty_valid ? '(有效)' : '(已过期)'}
+                                        </div>
+                                    </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `;
+        }).join('')}
+                </div>
+            </div>
+        `;
+
+        // 3. 可重兑区域
         const canReuseHtml = data.can_reuse ? `
-            <div style="margin-top: 1.5rem; padding: 1.5rem; background: rgba(34, 197, 94, 0.1); border-radius: 8px; border: 1px solid rgba(34, 197, 94, 0.3);">
-                <h4 style="margin: 0 0 1rem 0; color: var(--success); font-size: 1rem;">
-                    <i data-lucide="check-circle" style="width: 18px; height: 18px;"></i> 
-                    可以重复使用
-                </h4>
-                <p style="margin: 0 0 1rem 0; color: var(--text-secondary);">
-                    您的质保兑换码可以重复使用！请复制下方兑换码，返回兑换页面重新兑换。
+            <div style="margin-top: 2rem; padding: 1.5rem; background: rgba(34, 197, 94, 0.1); border-radius: 12px; border: 1px solid rgba(34, 197, 94, 0.3);">
+                <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--success); margin-bottom: 0.8rem;">
+                    <i data-lucide="check-circle" style="width: 20px; height: 20px;"></i> 
+                    <span style="font-weight: 600;">发现失效 Team，质保可触发</span>
+                </div>
+                <p style="margin: 0 0 1.2rem 0; color: var(--text-secondary); font-size: 0.95rem;">
+                    监测到您所在的 Team 已失效。由于您的质保码仍在有效期内，您可以立即复制兑换码进行重兑。
                 </p>
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
                     <input type="text" value="${escapeHtml(data.original_code)}" readonly 
-                        style="flex: 1; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border-base); border-radius: 6px; color: var(--text-primary); font-family: monospace; font-size: 1.1rem;">
+                        style="flex: 1; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border-base); border-radius: 8px; color: var(--text-primary); font-family: monospace; font-size: 1.1rem;">
                     <button onclick="copyWarrantyCode('${escapeHtml(data.original_code)}')" class="btn btn-primary" style="white-space: nowrap;">
                         <i data-lucide="copy"></i> 复制
                     </button>
@@ -368,26 +424,15 @@ function showWarrantyResult(data) {
         ` : '';
 
         warrantyContent.innerHTML = `
-            <div class="warranty-details">
-                <div class="result-detail-item" style="padding: 1rem; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 1rem;">
-                    <span class="result-detail-label">质保状态</span>
-                    <span class="result-detail-value">${warrantyStatus}</span>
-                </div>
-                
-                ${data.warranty_expires_at ? `
-                <div class="result-detail-item" style="padding: 1rem; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 1rem;">
-                    <span class="result-detail-label">质保到期时间</span>
-                    <span class="result-detail-value">${formatDate(data.warranty_expires_at)}</span>
-                </div>
-                ` : ''}
-                
-                <div class="result-detail-item" style="padding: 1rem; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 1rem;">
-                    <span class="result-detail-label">原兑换码</span>
-                    <span class="result-detail-value" style="font-family: monospace;">${escapeHtml(data.original_code)}</span>
-                </div>
-                
-                ${bannedTeamsHtml}
+            <div class="warranty-view">
+                ${summaryHtml}
+                ${recordsHtml}
                 ${canReuseHtml}
+                <div style="margin-top: 2rem; text-align: center;">
+                    <button onclick="backToStep1()" class="btn btn-secondary" style="width: 100%;">
+                        <i data-lucide="arrow-left"></i> 返回兑换
+                    </button>
+                </div>
             </div>
         `;
     }

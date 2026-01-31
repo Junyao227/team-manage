@@ -63,50 +63,76 @@ class WarrantyService:
                 }
             _query_rate_limit[limit_key] = now
 
-            # 1. 根据邮箱或兑换码查找兑换记录
-            redemption_code_obj = None
-            redemption_records = []
+            # 1. 查找兑换记录和相关联的 Team, Code
+            records_data = []
 
             if code:
-                # 通过兑换码查找
-                stmt = select(RedemptionCode).where(RedemptionCode.code == code)
+                # 通过兑换码查找所有关联记录
+                stmt = (
+                    select(RedemptionRecord, RedemptionCode, Team)
+                    .join(RedemptionCode, RedemptionRecord.code == RedemptionCode.code)
+                    .join(Team, RedemptionRecord.team_id == Team.id)
+                    .where(RedemptionCode.code == code)
+                    .order_by(RedemptionRecord.redeemed_at.desc())
+                )
                 result = await db_session.execute(stmt)
-                redemption_code_obj = result.scalar_one_or_none()
+                records_data = result.all()
 
-                if not redemption_code_obj:
+                # 如果没有记录，可能是码还没被使用或不存在
+                if not records_data:
+                    stmt = select(RedemptionCode).where(RedemptionCode.code == code)
+                    result = await db_session.execute(stmt)
+                    redemption_code_obj = result.scalar_one_or_none()
+                    
+                    if not redemption_code_obj:
+                        return {
+                            "success": True,
+                            "has_warranty": False,
+                            "warranty_valid": False,
+                            "warranty_expires_at": None,
+                            "banned_teams": [],
+                            "can_reuse": False,
+                            "original_code": None,
+                            "records": [],
+                            "message": "兑换码不存在"
+                        }
+                    
+                    # 只有码没有记录的情况
                     return {
                         "success": True,
-                        "has_warranty": False,
-                        "warranty_valid": False,
-                        "warranty_expires_at": None,
+                        "has_warranty": redemption_code_obj.has_warranty,
+                        "warranty_valid": True if not redemption_code_obj.warranty_expires_at or redemption_code_obj.warranty_expires_at > get_now() else False,
+                        "warranty_expires_at": redemption_code_obj.warranty_expires_at.isoformat() if redemption_code_obj.warranty_expires_at else None,
                         "banned_teams": [],
                         "can_reuse": False,
-                        "original_code": None,
-                        "error": None,
-                        "message": "兑换码不存在"
+                        "original_code": redemption_code_obj.code,
+                        "records": [{
+                            "code": redemption_code_obj.code,
+                            "has_warranty": redemption_code_obj.has_warranty,
+                            "warranty_valid": True if not redemption_code_obj.warranty_expires_at or redemption_code_obj.warranty_expires_at > get_now() else False,
+                            "status": redemption_code_obj.status,
+                            "used_at": None,
+                            "team_id": None,
+                            "team_name": None,
+                            "team_status": None,
+                            "warranty_expires_at": redemption_code_obj.warranty_expires_at.isoformat() if redemption_code_obj.warranty_expires_at else None
+                        }],
+                        "message": "兑换码尚未被使用"
                     }
-
-                # 查找该兑换码的所有使用记录
-                stmt = select(RedemptionRecord).where(RedemptionRecord.code == code)
-                result = await db_session.execute(stmt)
-                redemption_records = result.scalars().all()
 
             elif email:
                 # 通过邮箱查找所有兑换记录
-                stmt = select(RedemptionRecord).where(RedemptionRecord.email == email)
+                stmt = (
+                    select(RedemptionRecord, RedemptionCode, Team)
+                    .join(RedemptionCode, RedemptionRecord.code == RedemptionCode.code)
+                    .join(Team, RedemptionRecord.team_id == Team.id)
+                    .where(RedemptionRecord.email == email)
+                    .order_by(RedemptionRecord.redeemed_at.desc())
+                )
                 result = await db_session.execute(stmt)
-                redemption_records = result.scalars().all()
+                records_data = result.all()
 
-                # 查找是否有质保兑换码
-                for record in redemption_records:
-                    stmt = select(RedemptionCode).where(RedemptionCode.code == record.code)
-                    result = await db_session.execute(stmt)
-                    code_obj = result.scalar_one_or_none()
-                    if code_obj and code_obj.has_warranty:
-                        redemption_code_obj = code_obj
-                        break
-
-            if not redemption_code_obj:
+            if not records_data:
                 return {
                     "success": True,
                     "has_warranty": False,
@@ -115,63 +141,75 @@ class WarrantyService:
                     "banned_teams": [],
                     "can_reuse": False,
                     "original_code": None,
-                    "error": None,
-                    "message": "未找到质保兑换码"
+                    "records": [],
+                    "message": "未找到兑换记录"
                 }
 
-            # 2. 检查是否为质保兑换码
-            if not redemption_code_obj.has_warranty:
-                return {
-                    "success": True,
-                    "has_warranty": False,
-                    "warranty_valid": False,
-                    "warranty_expires_at": None,
-                    "banned_teams": [],
-                    "can_reuse": False,
-                    "original_code": redemption_code_obj.code,
-                    "error": None,
-                    "message": "该兑换码不是质保兑换码"
-                }
+            # 2. 处理记录并进行必要的实时同步
+            final_records = []
+            banned_teams_info = []
+            has_any_warranty = False
+            primary_warranty_valid = False
+            primary_expiry = None
+            primary_code = None
+            can_reuse = False
 
-            # 3. 检查质保是否有效
-            warranty_valid = True
-            if redemption_code_obj.warranty_expires_at:
-                if redemption_code_obj.warranty_expires_at < get_now():
-                    warranty_valid = False
+            for record, code_obj, team in records_data:
+                # 同步 Team 状态
+                if team.status not in ["banned", "error"]:
+                    logger.info(f"质保查询: 正在实时测试 Team {team.id} ({team.team_name}) 的状态")
+                    await self.team_service.sync_team_info(team.id, db_session)
+                    # 同步后 team 对象的属性会自动更新
 
-            # 4. 查找被封的 Team
-            banned_teams = []
-            for record in redemption_records:
-                stmt = select(Team).where(Team.id == record.team_id)
-                result = await db_session.execute(stmt)
-                team = result.scalar_one_or_none()
-                if team:
-                    # 如果不是已封号状态，则进行一次实时测试
-                    if team.status != "banned":
-                        logger.info(f"质保查询: 正在实时测试 Team {team.id} ({team.team_name}) 的状态")
-                        await self.team_service.sync_team_info(team.id, db_session)
-                        # sync_team_info 会更新 team 对象的属性并提交
+                # 提取质保信息
+                is_valid = True
+                if code_obj.warranty_expires_at and code_obj.warranty_expires_at < get_now():
+                    is_valid = False
 
-                    if team.status == "banned":
-                        banned_teams.append({
-                            "team_id": team.id,
-                            "team_name": team.team_name,
-                            "email": team.email,
-                            "banned_at": team.last_sync.isoformat() if team.last_sync else None
-                        })
+                if code_obj.has_warranty:
+                    has_any_warranty = True
+                    # 以最近的一个质保码作为主要质保状态参考
+                    if primary_code is None:
+                        primary_warranty_valid = is_valid
+                        primary_expiry = code_obj.warranty_expires_at
+                        primary_code = code_obj.code
 
-            # 5. 判断是否可以重复使用
-            can_reuse = warranty_valid and len(banned_teams) > 0
+                # 记录封号 Team
+                if team.status == "banned":
+                    banned_teams_info.append({
+                        "team_id": team.id,
+                        "team_name": team.team_name,
+                        "email": team.email,
+                        "banned_at": team.last_sync.isoformat() if team.last_sync else None
+                    })
+
+                final_records.append({
+                    "code": code_obj.code,
+                    "has_warranty": code_obj.has_warranty,
+                    "warranty_valid": is_valid,
+                    "warranty_expires_at": code_obj.warranty_expires_at.isoformat() if code_obj.warranty_expires_at else None,
+                    "status": code_obj.status,
+                    "used_at": record.redeemed_at.isoformat() if record.redeemed_at else None,
+                    "team_id": team.id,
+                    "team_name": team.team_name,
+                    "team_status": team.status,
+                })
+
+            # 3. 判断是否可以重复使用 (只要有有效的质保码且有被封的 Team)
+            if has_any_warranty and primary_warranty_valid and len(banned_teams_info) > 0:
+                # 进一步验证 (使用现有的 validate_warranty_reuse 逻辑)
+                # 这里为了简单直接复用逻辑判断
+                can_reuse = True
 
             return {
                 "success": True,
-                "has_warranty": True,
-                "warranty_valid": warranty_valid,
-                "warranty_expires_at": redemption_code_obj.warranty_expires_at.isoformat() if redemption_code_obj.warranty_expires_at else None,
-                "banned_teams": banned_teams,
+                "has_warranty": has_any_warranty,
+                "warranty_valid": primary_warranty_valid,
+                "warranty_expires_at": primary_expiry.isoformat() if primary_expiry else None,
+                "banned_teams": banned_teams_info,
                 "can_reuse": can_reuse,
-                "original_code": redemption_code_obj.code,
-                "error": None,
+                "original_code": primary_code,
+                "records": final_records,
                 "message": "查询成功"
             }
 
