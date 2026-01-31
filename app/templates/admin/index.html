@@ -106,8 +106,12 @@
                             已满
                             {% elif team.status == 'expired' %}
                             已过期
-                            {% else %}
+                            {% elif team.status == 'banned' %}
+                            已封禁
+                            {% elif team.status == 'error' %}
                             异常
+                            {% else %}
+                            未知
                             {% endif %}
                         </span>
                     </td>

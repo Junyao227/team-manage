@@ -445,11 +445,12 @@ class TeamService:
             if status:
                 team.status = status
 
-            # 更新状态
-            if team.current_members >= team.max_members:
-                team.status = "full"
-            elif team.status == "full" and team.current_members < team.max_members:
-                team.status = "active"
+            # 自动维护 active/full 状态 (仅当当前处于这两者之一时)
+            if team.status in ["active", "full"]:
+                if team.current_members >= team.max_members:
+                    team.status = "full"
+                else:
+                    team.status = "active"
 
             await db_session.commit()
             logger.info(f"Team {team_id} 信息更新成功")
@@ -727,7 +728,7 @@ class TeamService:
 
             # 7. 确定状态
             status = "active"
-            if current_members >= 6:
+            if current_members >= team.max_members:
                 status = "full"
             elif expires_at and expires_at < datetime.now():
                 status = "expired"

@@ -463,6 +463,27 @@ body {
     color: var(--info);
 }
 
+.status-full {
+    background: var(--warning-soft);
+    color: var(--warning);
+}
+
+.status-expired {
+    background: var(--danger-soft);
+    color: var(--danger);
+}
+
+.status-error {
+    background: var(--danger-soft);
+    color: var(--danger);
+}
+
+.status-banned {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+}
+
 .role-badge {
     display: inline-block;
     padding: 0.2rem 0.5rem;
