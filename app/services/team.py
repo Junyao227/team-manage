@@ -437,6 +437,7 @@ class TeamService:
         email: Optional[str] = None,
         account_id: Optional[str] = None,
         max_members: Optional[int] = None,
+        team_name: Optional[str] = None,
         status: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -449,6 +450,8 @@ class TeamService:
             email: 新的邮箱 (可选)
             account_id: 新的 Account ID (可选)
             max_members: 最大成员数 (可选)
+            team_name: Team 名称 (可选)
+            status: 状态 (可选)
 
         Returns:
             结果字典
@@ -475,6 +478,8 @@ class TeamService:
                 team.account_id = account_id
             if max_members is not None:
                 team.max_members = max_members
+            if team_name is not None:
+                team.team_name = team_name
             if status:
                 team.status = status
 

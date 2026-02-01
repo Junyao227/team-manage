@@ -68,6 +68,7 @@ class TeamUpdateRequest(BaseModel):
     session_token: Optional[str] = Field(None, description="新 Session Token")
     client_id: Optional[str] = Field(None, description="新 Client ID")
     max_members: Optional[int] = Field(None, description="最大成员数")
+    team_name: Optional[str] = Field(None, description="Team 名称")
     status: Optional[str] = Field(None, description="状态: active/full/expired/error/banned")
 
 
@@ -228,6 +229,7 @@ async def update_team(
             session_token=update_data.session_token,
             client_id=update_data.client_id,
             max_members=update_data.max_members,
+            team_name=update_data.team_name,
             status=update_data.status
         )
         if not result["success"]:
